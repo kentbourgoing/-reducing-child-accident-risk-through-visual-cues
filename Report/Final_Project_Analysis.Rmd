@@ -1,0 +1,659 @@
+---
+title: "Evaluating Low-Cost Cues for Reducing Child Pedestrian Accident Risk"
+author: "Daniel Brown, Kent Bourgoing, Sunil Thakur"
+subtitle: DATASCI 241, Section 2
+output:
+  pdf_document:
+    latex_engine: xelatex
+geometry: margin=1in
+fontsize: 10pt
+---
+
+```{r load packages, echo=FALSE, message=FALSE}
+library(data.table)
+
+library(sandwich)
+library(lmtest)
+
+library(AER) 
+
+library(ggplot2) 
+library(dplyr)
+library(scales)
+library(patchwork)
+library(stargazer)
+library(knitr)
+
+```
+
+## Load Data
+
+```{r load data, echo = TRUE}
+d <- data.table::fread(
+  input = 'Measurement_Log.csv', 
+  header = TRUE)
+
+factor_cols <- c("Vehicle_Class", "Vehicle_Color", "Fuel_Type", "Treatment", "Day")
+d <- d[, (factor_cols) := lapply(.SD, factor), .SDcols = factor_cols]
+
+head(d)
+```
+
+```{r}
+# Add binary indicator: 1 if <= 25 mph, 0 if > 25 mph
+d[, at_or_below_25 := as.integer(Average_Speed_mph <= 25)]
+
+# labeled factor version for plots/tables
+d[, speed_bin := fifelse(Average_Speed_mph <= 25, "At/Below 25", "Above 25")]
+d[, speed_bin := factor(speed_bin, levels = c("At/Below 25", "Above 25"))]
+
+# Quick check
+d[, .(N = .N, share_at_or_below_25 = mean(at_or_below_25)), by = Treatment]
+head(d)
+
+```
+
+```{r}
+summary(d)
+```
+
+
+## Regression Analysis
+
+Basic Model
+
+```{r base model, echo=FALSE}
+mod_base <- lm(Average_Speed_mph ~ Treatment, data = d)
+mod_base_robust_se <- coeftest(mod_base, vcov = vcovHC(mod_base, type = "HC1"))
+mod_base_robust_se
+
+
+robust_ci <- coefci(mod_base, vcov = vcovHC(mod_base, type = "HC3"))
+robust_ci
+```
+
+
+
+```{r model 1, echo=FALSE}
+# Model 1: + Vehicle Class
+mod_class <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class, data = d)
+mod_class_se <- coeftest(mod_class, vcov = vcovHC(mod_class, type = "HC1"))
+mod_class_ci <- coefci(mod_class, vcov = vcovHC(mod_class, type = "HC3"))
+mod_class_se
+mod_class_ci
+```
+
+```{r model 2, echo=FALSE}
+# Model 2: + Vehicle Class + Vehicle Color
+mod_class_color <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color, data = d)
+mod_class_color_se <- coeftest(mod_class_color, vcov = vcovHC(mod_class_color, type = "HC1"))
+mod_class_color_ci <- coefci(mod_class_color, vcov = vcovHC(mod_class_color, type = "HC3"))["TreatmentT3", ]
+mod_class_color_se
+mod_class_color_ci
+```
+
+```{r model 3, echo=FALSE}
+# Model 3: + Vehicle Class + Color + Fuel Type
+mod_full <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color + Fuel_Type, data = d)
+mod_full_se <- coeftest(mod_full, vcov = vcovHC(mod_full, type = "HC1"))
+mod_full_ci <- coefci(mod_full, vcov = vcovHC(mod_full, type = "HC3"))["TreatmentT3", ]
+mod_full_se
+mod_full_ci
+```
+
+```{r ftests, echo=TRUE, message=FALSE}
+# Subset to rows with no missing values in our key variables
+keep <- complete.cases(
+  d[, c("Average_Speed_mph", "Treatment", 
+        "Vehicle_Class", "Vehicle_Color", "Fuel_Type")]
+)
+d <- d[keep, ]
+
+# Fit the nested models on the same dataset
+mod_base  <- lm(Average_Speed_mph ~ Treatment, data = d)
+mod_class <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class,  data = d)
+mod_class_color <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color, data = d)
+mod_full <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color + Fuel_Type, data = d)
+
+# Perform F-tests for each block of added covariates
+# Does Vehicle_Class improve over Treatment alone?
+anova(mod_base, mod_class)
+
+# Does adding Vehicle_Color improve over Vehicle_Class?
+anova(mod_class, mod_class_color)
+
+# Does adding Fuel_Type improve over Class+Color?
+anova(mod_class_color, mod_full)
+```
+
+```{r ftests_individual, echo=TRUE, message=FALSE}
+# Fit the base model and base+one‐covariate models
+mod_base         <- lm(Average_Speed_mph ~ Treatment,                       data = d)
+mod_base_class   <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class,       data = d)
+mod_base_color   <- lm(Average_Speed_mph ~ Treatment + Vehicle_Color,       data = d)
+mod_base_fuel    <- lm(Average_Speed_mph ~ Treatment + Fuel_Type,           data = d)
+
+# Perform F-tests comparing base vs. each single‐covariate model
+#    (a) Base vs. + Vehicle_Class
+cat("F-test: Base vs. +Vehicle_Class\n")
+print(anova(mod_base, mod_base_class))
+
+# (b) Base vs. + Vehicle_Color
+cat("\nF-test: Base vs. +Vehicle_Color\n")
+print(anova(mod_base, mod_base_color))
+
+# (c) Base vs. + Fuel_Type
+cat("\nF-test: Base vs. +Fuel_Type\n")
+print(anova(mod_base, mod_base_fuel))
+```
+
+```{r Vehicle Class Distribution by Treatment, fig.width=6, fig.height = 3, fig.align = "center"}
+# Compute percentages by Treatment and Vehicle_Class
+df_prop <- d %>%
+  count(Treatment, Vehicle_Class) %>%
+  group_by(Treatment) %>%
+  mutate(pct = n / sum(n))
+
+# Plot stacked bars with percentage labels
+ggplot(df_prop, aes(x = Treatment, y = pct, fill = Vehicle_Class)) +
+  geom_col() +
+  geom_text(
+    aes(label = percent(pct, accuracy = 1)),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = "Vehicle Class",
+    title = "Vehicle Class Mix by Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+```{r}
+# Compute percentages by Treatment and Vehicle_Color
+df_color_prop <- d %>%
+  count(Treatment, Vehicle_Color) %>%
+  group_by(Treatment) %>%
+  mutate(pct = n / sum(n))
+
+# Plot stacked bars with percentage labels
+ggplot(df_color_prop, aes(x = Treatment, y = pct, fill = Vehicle_Color)) +
+  geom_col() +
+  geom_text(
+    aes(label = percent(pct, accuracy = 1)),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = "Color Type",
+    title = "Vehicle Color Balance by Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+
+```{r}
+# Fit the base model and compute robust covariance
+mod_base <- lm(Average_Speed_mph ~ Treatment, data = d)
+V_robust <- vcovHC(mod_base, type = "HC1")
+
+# Build prediction frame for each Treatment level
+df_preds <- data.frame(Treatment = levels(d$Treatment))
+X        <- model.matrix(~ Treatment, df_preds)
+est      <- predict(mod_base, newdata = df_preds)
+se_rob   <- sqrt(diag(X %*% V_robust %*% t(X)))
+
+# Assemble stats with robust CIs
+df_stats <- df_preds %>%
+  mutate(
+    mean_speed = est,
+    ci_low     = est - 1.96 * se_rob,
+    ci_high    = est + 1.96 * se_rob
+  )
+
+# Plot boxplots with robust mean & CI, no legend or scatter
+ggplot(d, aes(x = Treatment, y = Average_Speed_mph)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4, fill = "#4C72B0", alpha = 0.3, show.legend = FALSE) +
+  geom_errorbar(
+    data = df_stats,
+    aes(x = Treatment, y = mean_speed, ymin = ci_low, ymax = ci_high),
+    width = 0.2, color = "red", size = 0.8, show.legend = FALSE
+  ) +
+  geom_point(
+    data = df_stats,
+    aes(x = Treatment, y = mean_speed),
+    shape = 21, fill = "white", color = "red", size = 3, show.legend = FALSE
+  ) +
+  coord_cartesian(ylim = c(20, 28)) +
+  scale_y_continuous(name = "Vehicle Speed (mph)") +
+  labs(
+    x = "Treatment Condition",
+    title = "Speed Distributions by Treatment",
+    subtitle = "Boxplots with Robust Mean & 95% CI (red)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+
+```{r speed-limit-proportions, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Compute above/below counts and percentages by Treatment
+df_limit <- d %>%
+  mutate(OverLimit = Average_Speed_mph > 25) %>%
+  group_by(Treatment, OverLimit) %>%
+  summarise(Count = n(), .groups="drop") %>%
+  group_by(Treatment) %>%
+  mutate(
+    Percent = Count / sum(Count),
+    Label   = if_else(OverLimit, "Above 25 mph", "At or Below 25 mph"),
+    pct_txt = percent(Percent, accuracy = 1)
+  )
+
+# Plot with percentage labels
+ggplot(df_limit, aes(x = Treatment, y = Percent, fill = Label)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = pct_txt),
+    position = position_stack(vjust = 0.5),
+    color = "white",
+    size = 4
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(
+    values = c(
+      "At or Below 25 mph" = "#4C72B0",
+      "Above 25 mph"        = "#C44E52"
+    )
+  ) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = NULL,
+    title = "Share of Cars Above vs. At/Below 25 mph by Treatment"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor    = element_blank(),
+    panel.grid.major.x  = element_blank(),
+    plot.title          = element_text(hjust = 0.5)
+  )
+
+```
+
+
+
+
+```{r}
+# Assuming d is your filtered, complete‐case data.table/data.frame
+
+# Control group: Days 1, 2, and 3
+df_ctrl <- d %>%
+  filter(Treatment == "C", Day %in% c("1", "2", "3"))
+
+ggplot(df_ctrl, aes(x = Day, y = Average_Speed_mph)) +
+  geom_boxplot(fill = "#4C72B0", alpha = 0.4, outlier.shape = NA) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 0.8) +
+  coord_cartesian(ylim = c( min(df_ctrl$Average_Speed_mph) - 1,
+                            max(df_ctrl$Average_Speed_mph) + 1 )) +
+  labs(
+    title    = "Control Group: Speed by Day (Days 1–3)",
+    x        = "Day",
+    y        = "Vehicle Speed (mph)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title     = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+# Treatment 1 group: Days 3 and 4
+df_t1 <- d %>%
+  filter(Treatment == "T1", Day %in% c("3", "4"))
+
+ggplot(df_t1, aes(x = Day, y = Average_Speed_mph)) +
+  geom_boxplot(fill = "#55A868", alpha = 0.4, outlier.shape = NA) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 0.8) +
+  coord_cartesian(ylim = c( min(df_t1$Average_Speed_mph) - 1,
+                            max(df_t1$Average_Speed_mph) + 1 )) +
+  labs(
+    title    = "Treatment 1: Speed by Day (Days 3–4)",
+    x        = "Day",
+    y        = "Vehicle Speed (mph)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title      = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+
+
+```{r}
+# Control arm: Days 1, 2, 3
+df_ctrl <- d %>% filter(Treatment == "C", Day %in% c("1","2","3"))
+
+# 1A. Check normality (optional)
+shapiro.test(df_ctrl$Average_Speed_mph[df_ctrl$Day=="1"])
+shapiro.test(df_ctrl$Average_Speed_mph[df_ctrl$Day=="2"])
+shapiro.test(df_ctrl$Average_Speed_mph[df_ctrl$Day=="3"])
+
+# 1B. One‐way ANOVA
+mod_ctrl <- aov(Average_Speed_mph ~ Day, data = df_ctrl)
+summary(mod_ctrl)
+
+# 1C. Post‐hoc pairwise Tukey HSD
+TukeyHSD(mod_ctrl)
+
+# 1D. If you prefer a non‐parametric test:
+kruskal.test(Average_Speed_mph ~ Day, data = df_ctrl)
+
+
+# Treatment 1 arm: Days 3 vs 4
+df_t1 <- d %>% filter(Treatment=="T1", Day %in% c("3","4"))
+
+# 2A. Check normality (optional)
+shapiro.test(df_t1$Average_Speed_mph[df_t1$Day=="3"])
+shapiro.test(df_t1$Average_Speed_mph[df_t1$Day=="4"])
+
+# 2B. Two‐sample t‐test (Welch)
+t.test(Average_Speed_mph ~ Day, data = df_t1)
+
+# 2C. If non‐parametric preferred:
+wilcox.test(Average_Speed_mph ~ Day, data = df_t1)
+
+```
+
+Straight Forward Test
+```{r}
+# Subset data
+df_ctrl <- d %>% filter(Treatment == "C", Day %in% c("1","2","3"))
+df_t1   <- d %>% filter(Treatment == "T1", Day %in% c("3","4"))
+
+# Control arm (Days 1–3): Kruskal–Wallis test
+kruskal_ctrl <- kruskal.test(Average_Speed_mph ~ Day, data = df_ctrl)
+print(kruskal_ctrl)
+
+# Treatment 1 arm (Days 3 vs 4): Wilcoxon rank-sum test
+wilcox_t1 <- wilcox.test(Average_Speed_mph ~ Day, data = df_t1)
+print(wilcox_t1)
+
+```
+Control arm (Days 1–3):
+The Kruskal–Wallis test compares the distributions of speeds across Days 1, 2, and 3 for the control group. A p-value well above 0.05 indicates no statistically significant difference in driver speeds from day to day under the control condition.
+
+Treatment 1 arm (Days 3 vs 4):
+The Wilcoxon rank-sum test (Mann–Whitney U) compares speeds on Day 3 and Day 4 when the “Slow – Kids at Play” sign was in place. Again, a p-value above 0.05 shows no evidence that mean or median speeds differed between those two treatment days.
+
+
+
+```{r}
+# Simple side‐by‐side table in text form
+stargazer(
+  mod_base, 
+  mod_class, 
+  mod_class_color, 
+  mod_full,
+  type            = "text",
+  title           = "Regression Results: Average Speed (mph)",
+  dep.var.labels  = "Average_Speed_mph",
+  omit.stat       = c("f", "ser", "adj.rsq", "rsq", "n")
+)
+
+```
+
+```{r}
+se_base        <- sqrt(diag(vcovHC(mod_base,        type = "HC1")))
+se_class       <- sqrt(diag(vcovHC(mod_class,       type = "HC1")))
+se_class_color <- sqrt(diag(vcovHC(mod_class_color, type = "HC1")))
+se_full        <- sqrt(diag(vcovHC(mod_full,        type = "HC1")))
+
+# 2. Produce side-by-side stargazer table with robust SEs
+library(stargazer)
+stargazer(
+  mod_base, mod_class, mod_class_color, mod_full,
+  se             = list(se_base, se_class, se_class_color, se_full),
+  type           = "text",
+  title          = "Regression Results: Average Speed (mph)",
+  dep.var.labels = "Average_Speed_mph",
+  omit.stat      = c("f", "ser", "adj.rsq", "rsq", "n"),
+  notes          = "Robust (HC1) standard errors in parentheses"
+)
+
+```
+
+```{r}
+
+# 1. Fit the no‐intercept “mean by group” model
+mod_means <- lm(Average_Speed_mph ~ 0 + Treatment, data = d)
+
+# 2. Extract HC1 robust SEs and compute CIs
+vc      <- vcovHC(mod_means, type = "HC1")
+est     <- coef(mod_means)
+se      <- sqrt(diag(vc))
+ci_low  <- est - 1.96 * se
+ci_high <- est + 1.96 * se
+
+# 3. Get counts by the raw factor levels
+counts <- table(d$Treatment)  
+
+# 4. Build the summary tibble, matching names
+summary_df <- tibble(
+  TreatmentCode = names(est),                    # e.g. "TreatmentC"
+  Level         = sub("^Treatment", "", TreatmentCode),  # strips off "Treatment"
+  N             = as.integer(counts[Level]),     # now counts["C"], counts["T1"], ...
+  Mean_Speed    = as.numeric(est),
+  Robust_SE     = se,
+  CI_Lower      = ci_low,
+  CI_Upper      = ci_high
+) %>%
+  mutate(
+    Pct_ΔMean    = 100*(Mean_Speed - Mean_Speed[Level=="C"])/Mean_Speed[Level=="C"],
+    Pct_ΔLower   = 100*(CI_Lower  - CI_Lower[Level=="C"])/CI_Lower[Level=="C"],
+    Pct_ΔUpper   = 100*(CI_Upper  - CI_Upper[Level=="C"])/CI_Upper[Level=="C"]
+  ) %>%
+  select(
+    Condition = Level,
+    `Cars (N)` = N,
+    `Avg Speed (mph)` = Mean_Speed,
+    `Robust SE`      = Robust_SE,
+    `CI Lower`       = CI_Lower,
+    `CI Upper`       = CI_Upper,
+    `% ΔMean vs C`    = Pct_ΔMean,
+    `% Δ CI Lower`    = Pct_ΔLower,
+    `% Δ CI Upper`    = Pct_ΔUpper
+  )
+
+# 5. Render the table
+knitr::kable(
+  summary_df,
+  digits    = c(0, 0, 2, 3, 2, 2, 2, 2, 2),
+  caption   = "Summary of Speeds by Condition"
+)
+
+```
+
+
+
+```{r speed-summary-table, message=FALSE}
+# Make sure 'd' is in your environment and has column 'Average_Speed_mph'
+speed_summary <- d %>%
+  group_by(Treatment) %>%
+  summarize(
+    N_cars         = n(),
+    Mean_Speed     = mean(Average_Speed_mph),
+    SD_Speed       = sd(Average_Speed_mph)
+  ) %>%
+  ungroup()
+
+# Render as a simple table
+kable(
+  speed_summary,
+  digits  = c(0, 0, 2, 2),
+  col.names = c("Treatment", "N (cars)", "Mean Speed (mph)", "SD Speed (mph)"),
+  caption   = "Average Speed and Standard Deviation by Treatment"
+)
+
+
+```
+
+```{r treatment-cis, echo=FALSE, message=FALSE}
+
+# Fit the base model
+mod_base <- lm(Average_Speed_mph ~ Treatment, data = d)
+
+# Extract robust VCOV, SEs
+V_robust <- vcovHC(mod_base, type = "HC1")
+coefs     <- coef(mod_base)[c("TreatmentT1","TreatmentT2","TreatmentT3")]
+se_rob    <- sqrt(diag(V_robust))[c("TreatmentT1","TreatmentT2","TreatmentT3")]
+
+# Compute 95% CIs
+ci_lower  <- coefs - 1.96 * se_rob
+ci_upper  <- coefs + 1.96 * se_rob
+
+# Build table
+ate_table <- tibble(
+  Treatment = c("T1 vs C","T2 vs C","T3 vs C"),
+  ATE_mph   = coefs,
+  Robust_SE = se_rob,
+  CI_lower  = ci_lower,
+  CI_upper  = ci_upper
+)
+
+# Round and display
+ate_table %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  kable(
+    col.names = c("Comparison", "ATE (mph)", "Robust SE", "95% CI lower", "95% CI upper"),
+    caption   = "Average Treatment Effects & 95% CIs"
+  )
+
+```
+
+
+Power Analysis Code (The following code takes a while to run)
+
+```{r}
+# simulate_power <- function(
+#   tau            = 5,                          # treatment effect (mph)
+#   sims           = 500,                        # number of simulations
+#   possible.ns    = seq(10, 200, by = 2),      # grid of total sample sizes
+#   mu_control     = 25,                         # mean speed under control (mph)
+#   sigma_control  = 5,                          # SD of control speeds (mph)
+#   alpha          = 0.05                        # significance level
+# ) {
+#   # sanity check: all sample sizes even
+#   stopifnot(all((possible.ns %% 2) == 0))
+# 
+#   # prepare storage
+#   powers <- numeric(length(possible.ns))
+# 
+#   # Loop to vary total sample size
+#   for (j in seq_along(possible.ns)) {
+#     N <- possible.ns[j]
+#     sig_flags <- logical(sims)
+# 
+#     # Loop to repeat simulation
+#     for (i in seq_len(sims)) {
+#       # simulate potential outcomes
+#       Y0 <- rnorm(n = N, mean = mu_control, sd = sigma_control)
+#       Y1 <- Y0 + tau
+# 
+#       # random 50/50 assignment
+#       Z.sim <- sample(rep(c(0,1), each = N/2))
+# 
+#       # reveal observed Y
+#       Y.sim <- ifelse(Z.sim == 1, Y1, Y0)
+# 
+#       # fit regression and extract p‐value
+#       fit     <- lm(Y.sim ~ Z.sim)
+#       p.value <- summary(fit)$coefficients["Z.sim", "Pr(>|t|)"]
+#       sig_flags[i] <- (p.value <= alpha)
+#     }
+# 
+#     # Calculate power
+#     powers[j] <- mean(sig_flags)
+#   }
+# 
+#   # return a dataframe
+#   data.frame(
+#     N     = possible.ns,
+#     power = powers,
+#     tau   = tau
+#   )
+# }
+# 
+# # Scenario 1
+# df1 <- simulate_power(tau = -3)
+# 
+# # Scenario 2
+# df2 <- simulate_power(tau = -5)
+# 
+# # Scenario 3
+# df3 <- simulate_power(tau = -11)
+# 
+# # Plot
+# power_df <- bind_rows(df1, df2, df3) %>%
+#   mutate(Scenario = paste0("τ=", tau, " mph"))
+# 
+# ggplot(power_df, aes(x = N, y = power, color = Scenario)) +
+#   geom_line(linewidth = 1.2) +
+#   geom_hline(yintercept = 0.8, linetype = "dashed") +
+#   labs(
+#     x     = "Total Sample Size",
+#     y     = "Estimated Power",
+#     title = "Power vs. Sample Size under Various Effect Sizes"
+#   )
+
+```
+
+
+```{r}
+mod_base_bin <- lm(at_or_below_25 ~ Treatment, data = d)
+mod_base_bin_robust_se <- coeftest(mod_base_bin, vcov = vcovHC(mod_base_bin, type = "HC1"))
+mod_base_bin_robust_se
+
+robust_ci <- coefci(mod_base_bin, vcov = vcovHC(mod_base_bin, type = "HC3"))
+robust_ci
+```
+```{r}
+
+se_base_bin        <- sqrt(diag(vcovHC(mod_base_bin,        type = "HC1")))
+
+# 2. Produce side-by-side stargazer table with robust SEs
+library(stargazer)
+stargazer(
+  mod_base_bin,
+  se             = list(se_base_bin),
+  type           = "text",
+  title          = "Regression Results: Compliance %",
+  dep.var.labels = "Compliance %",
+  omit.stat      = c("f", "ser", "adj.rsq", "rsq", "n"),
+  notes          = "Robust (HC1) standard errors in parentheses"
+)
+
+```

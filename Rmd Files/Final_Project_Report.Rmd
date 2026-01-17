@@ -1,0 +1,778 @@
+---
+title: "Evaluating Low-Cost Cues for Reducing Child Pedestrian Accident Risk"
+author: "Daniel Brown, Kent Bourgoing, Sunil Thakur"
+subtitle: DATASCI 241, Section 2
+output:
+  pdf_document:
+    latex_engine: xelatex
+geometry: margin=1in
+fontsize: 10pt
+---
+
+```{r load packages, echo = FALSE,  message=FALSE, warning=FALSE}
+library(data.table)
+library(sandwich)
+library(lmtest)
+library(AER) 
+library(ggplot2) 
+library(dplyr)
+library(scales)
+library(patchwork)
+library(stargazer)
+library(knitr)
+
+
+theme_set(theme_minimal())
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning = FALSE)
+
+```
+
+```{r set themes,  echo = FALSE, message=FALSE, warning=FALSE}
+theme_set(theme_minimal())
+```
+
+
+```{r load data, echo = FALSE, message=FALSE, warning=FALSE}
+d <- data.table::fread(
+  input = 'Measurement_Log.csv', 
+  header = TRUE)
+
+factor_cols <- c("Vehicle_Class", "Vehicle_Color", "Fuel_Type", "Treatment", "Day")
+d <- d[, (factor_cols) := lapply(.SD, factor), .SDcols = factor_cols]
+
+# Add binary indicator: 1 if <= 25 mph, 0 if > 25 mph
+d[, at_or_below_25 := as.integer(Average_Speed_mph <= 25)]
+
+# labeled factor version for plots/tables
+d[, speed_bin := fifelse(Average_Speed_mph <= 25, "At/Below 25", "Above 25")]
+d[, speed_bin := factor(speed_bin, levels = c("At/Below 25", "Above 25"))]
+```
+
+
+# Abstract
+
+Child pedestrians remain at high risk on U.S. neighborhood streets; in 2023 alone an estimated 385 children were killed and more than 9,300 were injured while walking (Safe Kids Worldwide, 2023). Since the chance of severe injury increases quickly with vehicle speed, even small reductions in speed can save lives. Physical traffic-calming devices such as speed humps work well but require time, money, and city approval. In this project, we test whether very low-cost and easy-to-set-up visual cues can encourage drivers to slow down when children may be nearby.
+
+Using a 1 × 4 factorial field experiment on Tracy Street in the Silver Lake district of Los Angeles, CA, USA, we recorded vehicle speeds under four conditions: (C1) no cue (control); (T1) a yellow fold-out “Slow, Kids at Play” sign; (T2) the sign plus approximately 300 children’s toys scattered on the roadside turf; and (T3) the sign, toys, and three helium “Happy Birthday” balloons. Six weekday sessions (3 pm to 6 pm) in July 2025 yielded approximately 100 vehicle observations per condition. Two fixed cameras, spaced 21–24 meters apart, captured each vehicle’s travel time, allowing speed calculation. Vehicle class, color, and fuel type were recorded as covariates.
+
+A linear regression model was used to estimate the average treatment effect (ATE) of the three treatments. The results show that the “Toys” treatment (T2) produced the largest reduction in average vehicle speed, with an estimated decrease of about 1.9 mph. This effect was highly statistically significant (p = 0.0001) and had a 95% confidence interval of [−2.91, −0.92]. The combined intervention (T3), which included the sign, toys, and balloons, led to a statistically significant average speed reduction of about 1.5 mph (p = 0.0113; 95% CI [−2.76, −0.35]). In contrast, the “Sign Only” treatment (T1) resulted in a smaller and statistically non-significant reduction of roughly 0.56 mph (p = 0.2551; 95% CI [−1.53, 0.41]). Adding the covariates (vehicle class, color, and fuel type) contributed little additional explanatory power to the regression models beyond the treatment effects.
+
+For the secondary outcome of compliance percentage, defined as the proportion of vehicles traveling at or below the 25 mph speed limit, the “Toys” treatment (T2) increased compliance by 18.0  percentage points compared to the control group (p = 0.0054; 95% CI [5.27, 30.79]). The combined treatment (T3) increased compliance by 16.91 percentage points (p = 0.0085; 95% CI [4.27, 29.56]), while the “Sign Only” treatment (T1) resulted in a smaller and statistically non-significant change of 1.38 percentage points (p = 0.8195; 95% CI [-10.57, 13.34]). These results parallel the primary outcome findings, suggesting that visual cues involving toys are more effective at encouraging speed limit compliance than signage alone.
+
+
+These findings suggest that while noticeable roadside elements, such as toys, can help reduce vehicle speeds, simple signs alone may not be sufficient. While the results of this study are not practically significant, they pave the way for future research. Further experiments using other low-cost, innovative cues designed to be more robust and free from potential biases could lead to more accurate results and ultimately identify the most effective methods for reducing vehicle speeds and lowering child pedestrian risk.
+
+
+# Background
+In the United States, approximately 600 children and adolescents are killed each year as pedestrians, with tens of thousands more injured (CSN, 2022). These incidents often happen close to home, with many injuries occurring on residential streets, often near the child’s own house (PMC, 2015). Certain times and situations are especially dangerous. For example, after-school hours are high-risk: 36% of pedestrian deaths among children under 16 occur between 3:00 and 7:00 PM, when children are commonly walking or playing outdoors (CSN, 2013). Young children are also especially at risk for “dart-out” accidents, such as running into the street unexpectedly, which account for about 43% of child pedestrian injuries (PMC, 2015). These patterns highlight the need for effective ways to protect children near roadways.
+
+Vehicle speed plays a major role in both how likely a crash is and how serious it becomes. Higher speeds reduce a driver’s reaction time, increase stopping distance, and lead to greater crash energy (IIHS, 2025). In simple terms, slower speeds can greatly improve a child’s chance of survival. One study found that the average pedestrian’s risk of death is about 10% at 23 mph but rises to 50% at 42 mph (AAA FTS, 2011). Another analysis showed that the chance of a pedestrian being killed is about 5% at 20 mph, but jumps to 45% at 30 mph (PMC, 2000). Lowering vehicle speeds not only helps prevent crashes but also reduces the severity of injuries when crashes occur. As a result, many child safety efforts focus on reducing traffic speed in areas where children are likely to be present (IIHS, 2025).
+
+Over time, both researchers and communities have tested a range of methods, from standard traffic engineering solutions to creative, low-cost visual cues, to slow down vehicles in neighborhoods and near schools.
+
+### Physical Traffic Calming
+Well-known engineering solutions like speed humps, raised crosswalks, curb extensions, and roundabouts force drivers to slow down by design. These tools require changes to the road but have shown strong safety benefits. For example, installing speed humps in residential areas has been linked to a large drop in child pedestrian crashes. One study in Los Angeles found a 37.5% reduction in collisions involving pedestrians under age 21 after a speed hump was added near a school (Arbogast et al., 2018). Another approach is lowering speed limits in areas with many children. A study in Canada showed that reducing school-zone speed limits from 50 km/h to 30 km/h (about 31 to 19 mph) led to a 45% decrease in crashes that caused death or injury (Sun et al., 2018). These examples show that managing speed, either through road design or traffic laws, can directly improve safety for child pedestrians.
+
+### Warning Signs and Signals
+“Slow – Children at Play” signs are inexpensive and often requested by concerned neighborhoods. However, there are almost no published experimental studies that isolate the causal effect of these signs on vehicle speeds. In fact, only one known field experiment has tested this directly: a Minnesota Department of Transportation study that installed “Children at Play” signs at three residential sites in the City of Bloomington, Minnesota, and measured speeds before and after installation. The study found small but measurable speed reductions at two sites: 0.9 mph and 1.5 mph. The third site showed no change. The authors concluded that although these differences were statistically significant, they were “not significant in any practical sense,” and that such signs are unlikely to affect real-world driving behavior (Davis et al., 2012).
+
+Beyond this study, the available evidence consists mostly of engineering handbooks and city-level observations, none of which offer controlled tests. Therefore, while the Minnesota study provides some insight, there is still a lack of strong evidence showing that “Children at Play” signs lead to meaningful reductions in vehicle speed. So far, based on the published research, these signs have shown little to no effect.
+
+### Innovative Low-Cost Cues
+Some communities have tested creative and affordable ways to get drivers to slow down. For example, in London, flat markings painted to look like speed bumps reduced average speeds by about 3 mph nine months after being installed, according to local trial data (Rocheleau, 2017). In New Delhi, 3-D crosswalks that appear to rise off the ground led to a 15% drop in speed, or about 4 mph on a 25 mph road, based on police measurements one year after installation (Rocheleau, 2017). In the United States, Kansas City painted a large street mural as part of Bloomberg Philanthropies’ Asphalt Art Initiative. Average speeds fell from about 25 mph to just under 14 mph, an 11 mph decrease (Page, 2022). While results vary and may not last over time, these examples suggest that bright, creative visuals, such as painted speed bumps, optical illusions, or colorful art, can catch drivers’ attention and lead to real, if temporary, speed reductions.
+
+# Research Question
+Our study builds on previous research by testing low-cost, child-themed visual cues, including signs, toys, and balloons, to determine whether they can capture drivers’ attention and lead to reduced vehicle speeds on a residential street.
+
+Reducing vehicle speed is a well-established method for decreasing both the likelihood and severity of child pedestrian accidents. While physical traffic-calming measures and strict speed limits are effective, they are often expensive or require formal policy changes. In contrast, low-cost, easily deployable alternatives, such as warning signs or visual distractions, can offer practical interim solutions.
+
+Although “Children at Play” signs alone have not shown a significant impact on vehicle speeds, as observed in the Minnesota study referenced earlier, other attention-grabbing elements like toys and balloons may be more effective. These cues could engage drivers in a similar way to painted murals or ground markings used in previous traffic-calming initiatives.
+
+Our central research question is:
+Can low-cost, child-themed visual cues meaningfully slow drivers and reduce the risk of child pedestrian injury?
+
+The hypotheses we aim to test are:
+
+H1: The installation of a 'Children at Play' sign will result in a statistically significant reduction in vehicular speeds compared to a control condition without any signage.
+
+$$H_1: ATE_{T1} < 0, \quad \alpha = 0.05$$
+Where $ATE$ is the average treatment effect.
+
+H2: The combined presence of the 'Children at Play' sign and strategically placed toys will produce a greater reduction in vehicle speeds than the sign alone.
+
+$$H_2: ATE_{T2} < ATE_{T1} < 0, \quad \alpha = 0.05$$
+
+H3: The integration of the 'Children at Play' sign, toys, and balloons will lead to the most substantial decrease in vehicular speeds, exceeding the effects observed with either the sign alone or the sign plus toys.
+
+$$H_3: ATE_{T3} < ATE_{T2} < ATE_{T1} < 0, \quad \alpha = 0.05$$
+
+An additional hypothesis we aim to test relates to compliance, defined as cars traveling at or below the 25 mph speed limit. Non-compliance refers to cars exceeding 25 mph. In this case, the outcome measure would be the compliance percentage.
+
+H4: The placement of any of the treatments (T1, T2, or T3) will result in a higher compliance percentage compared to cars that do not encounter any cues.
+
+# Experiment Design and Methods
+We conducted a 1×4 factorial field experiment on a residential/mixed-use street (Tracy Street in Silver Lake, Los Angeles, CA) to measure how various child-related cues affect driver speeds. The single factor was the presence of “children at play” cues, with four levels (conditions). Vehicles were recorded using two phone cameras positioned at fixed points along the street, with a known distance between them. By noting the exact time a vehicle passed each camera, we calculated its speed using the basic formula: speed equals distance divided by time. This method allowed us to estimate how fast each vehicle was traveling over that measured section of the street. The four experimental conditions were:
+
+1. Control (No Cues): No special signage or objects present (normal street conditions).
+2. Treatment T1 – Warning Sign: A portable bright-yellow fold-out sign reading “Slow, Kids at Play” was placed prominently in the front yard by the street.
+3. Treatment T2 – Sign + Toys: The same yellow “Kids at Play” sign plus ~300 children’s toys scattered on the grassy roadside/sidewalk area (e.g. small balls, cars, kid bracelets, etc.), simulating a yard where children had been playing.
+4. Treatment T3 – Sign + Toys + Balloons: All of the above (sign + toys), plus 3 helium-filled “Happy Birthday” balloons tied in the yard, to further suggest an ongoing children’s gathering (e.g. a birthday party).
+
+The experiment follows a ROXO (Randomization, Observation, X = Treatment, Observation) design structure to assess the impact of low-cost visual cues on vehicle speed across four as-good-as-randomized conditions.
+
+| Group (Condition) | Random Assignment | Treatment (X) | Observation (O=Speed) |
+|:-----------------:|:-----------------:|:-----------------:|:-----------------:|
+| C   | As-good-as-random   | No cue (baseline)   | Vehicle speed measured  |
+| T1  | As-good-as-random   | “Slow, Kids at Play” sign | Vehicle speed measured  |
+| T2  | As-good-as-random   | Sign + toys   | Vehicle speed measured  | 
+| T3  | As-good-as-random   | Sign + toys + balloons   | Vehicle speed measured  |
+
+The figure below shows the four test conditions on Tracy Street: (Top Left) Control with no added cue; (Top Right) Treatment 1 with a bright yellow “Slow – Kids at Play” fold-out sign; (Bottom Left) Treatment 2 with the sign plus approximately 300 children’s toys scattered on the roadside turf; (Bottom Right) Treatment 3 with the sign, toys, and three helium “Happy Birthday” balloons. The yellow fold-out sign was placed about 65 inches (1.66 meters) from the curb. Each condition was tested on multiple days, and vehicle speeds were recorded during afternoon hours when traffic was free-flowing. The figure below provides an aerial view of the experimental field setup.
+
+![](Treatments.png)
+![](Site_Map.png)
+
+The aerial view of Tracy Street shows the start (1) and end (2) camera positions marked with red circles. The start camera (1) was hidden behind a large, thick tree, and the end camera (2) was placed behind a parked car to prevent drivers from noticing them. This helped avoid bias in our experiment, as drivers might change their behavior if they realized they were being recorded. The distance between the cameras varied slightly from day to day, ranging from approximately 18.6 to 23.6 meters, due to minor adjustments at the site. The yellow star indicates where the treatment cue was placed near the curb. Orange arrows represent the direction of free-flow traffic during each session.
+
+### Flow Diagram
+
+The flow diagram illustrates the structure of the field experiment designed to evaluate the effect of visual roadside cues on vehicle speed. During scheduled sessions, vehicles passed through one of four treatment conditions: no intervention (C), sign only (T1), sign plus toys (T2), and sign plus toys and balloons (T3). Vehicle speed was calculated using two cameras positioned at the entry and exit points of the study zone. Covariate data were also collected for each vehicle. The resulting data were analyzed using regression models to compare vehicle speeds across treatment groups and assess the impact of each intervention.
+
+![](Flow_Diagram.png)
+
+### Data Collection Procedure
+On each test day, two video cameras were started simultaneously and positioned at fixed points along the street, with a known distance between them. The schedule of test conditions was as follows:
+
+- Day 1 (7/15/2025) – Control condition. Recording time ~5:00–6:00 PM. Camera spacing = 23.63 m.
+
+- Day 2 (7/17/2025) – Control condition (replicate). Time ~5:30–6:30 PM. Spacing = 18.57 m.
+
+- Day 3 (7/20/2025) – Mixed Control and T1 conditions (the sign was introduced partway through). Time ~1:00–4:00 PM. Spacing = 21.95 m.
+
+- Day 4 (7/27/2025) – T1 condition. Time ~5:00–6:30 PM. Spacing = 21.95 m.
+
+- Day 5 (7/30/2025) – T2 condition. Time ~3:30–6:00 PM. Spacing = 21.95 m.
+
+- Day 6 (7/31/2025) – T3 condition. Time ~3:30–6:00 PM. Spacing = 21.95 m.
+
+
+We focused on free-flow traffic, meaning vehicles with no immediate lead car, to capture drivers’ natural speeds under each condition. Vehicles that were parking along the street or turning onto side streets were excluded from the analysis. “Waymo” cars, which are fully self-driving vehicles without a human driver, were excluded since this experiment is geared toward human drivers.
+
+After collecting the videos, they were uploaded into a video editing tool to help identify the exact timestamps when vehicles passed each camera. We measured vehicle speed by recording the moment the front of the car crossed an imaginary vertical line at the start camera (start time) and again when the front of the car crossed a similar line at the end camera (end time). The figure below shows an example of how these timestamps were extracted.
+
+![](Video_Editor.png)
+
+In each frame, the red dashed line represents the virtual start and end lines. A chalk line was drawn on the ground as a reference to help align these virtual lines in the video. The left panel shows the moment a vehicle's front crosses the end-camera line, and the right panel shows when it crosses the start-camera line. These timestamps are used to calculate the vehicle's speed over the measured segment.
+
+### Vehicle Classification and Covariates Collected
+For each observed vehicle, we also recorded several attributes to use as covariates in the analysis, aiming to control for factors that might influence speed:
+
+- Vehicle Class: Coded by type/size. We used four categories:  L (Light commuter) for standard cars (sedans, hatchbacks, compact cars), S (Sport/Performance) for sports cars, coupes or high-performance vehicles, U (Family Utility) for SUVs, crossovers, or minivans, and H (Heavy/Commercial) for pickups, vans, buses, or trucks.
+
+- Vehicle Color: Noted as a proxy for visibility or driver personality assumptions. We dichotomized color into L (Light/Bright) vs. D (Dark/Neutral). “Light/Bright” includes white, silver, light gray, bright colors (yellow, red, light blue, etc.),  basically colors that look vivid or light at a glance. “Dark/Neutral” includes black, dark blue, dark gray, brown, maroon, etc., that appear dark or muted overall.
+
+- Fuel Type: Categorized as E (Electric) vs. G (Gasoline/Diesel/Hybrid). Electric vehicles were identified by the absence of a tailpipe, EV badges, or unique EV design features, whereas conventional gas/hybrid cars have visible exhaust pipes or no EV markings. (We noted fuel type because electric cars are often quieter and sometimes driven differently, though it’s unclear if that affects speed choice.)
+
+These covariates were collected to account for any differences in the types of vehicles across test conditions. For example, a day with more heavy trucks may naturally have different average speeds than a day with mostly small cars, regardless of the visual cues. Including vehicle class in the analysis helps improve the accuracy of the treatment effect estimates.
+
+### Randomization Process
+The study employed randomization at the day level rather than by individual vehicle. This decision was necessary because the visual treatments (sign, toys, and balloons) were clearly visible and could not be discreetly changed in real time without attracting attention or disrupting the flow of traffic.
+
+#### Key Assumptions Supporting Randomization
+To ensure the validity of the randomization process, the following assumptions were made:
+
+1. Single Exposure per Driver: It was assumed that each vehicle encountered only one treatment condition during the study period, minimizing the likelihood of repeat exposure.
+2. Stable Baseline Across Days: It was also assumed that baseline and treatment vehicle speeds remained consistent across all test days, with no significant day-to-day variation.
+
+#### Justification for Assumptions
+These assumptions are considered reasonable due to the following factors:
+
+- Large Number of Vehicles per Condition: For each treatment condition, a little over 100 vehicles were recorded. Given this large sample size, the likelihood of the same vehicle appearing in more than one condition is low. Most vehicles observed within each condition are expected to be unique, reducing the risk of repeat exposure across treatments.
+
+- Urban Traffic Environment: The study was conducted in Los Angeles, one of the most populous cities in the U.S. The high volume and variability of daily traffic make it unlikely that the same drivers were exposed to multiple treatment conditions.
+
+- Study Scheduling: Data collection took place between 3:00 PM and 6:00 PM on non-consecutive days, which helped maintain consistent traffic conditions while avoiding patterns that might influence driver behavior. Spacing the sessions apart reduced the chance that drivers would notice repeated visual cues and alter their behavior accordingly.
+
+Together, these factors support the assumption that treatment exposure was random, making the process “as-good-as-random” for causal inference.
+
+### Analysis Methodology
+The primary outcome analyzed in this study was the average vehicle speed, measured in miles per hour (mph) over a fixed interval between two camera points. This provided a consistent and objective metric for comparing vehicle behavior across different treatment conditions.
+
+The main predictor of interest was the treatment condition, which varied across four levels: a control group (no treatment), and three treatment groups: T1 (a "Children at Play" sign), T2 (the sign plus toys), and T3 (the sign, toys, and balloons combined). These conditions were designed to test whether increasingly child-themed visual cues could influence driver speed.
+
+To estimate the impact of these treatments, we applied a linear regression model. The base model included only the treatment variable to assess its direct effect on vehicle speed. We then extended the model with a series of nested covariate blocks, adding vehicle-level characteristics such as vehicle class, color, and fuel type. This stepwise approach allowed us to evaluate whether controlling for these additional features meaningfully changed the estimated treatment effects or improved model performance. The full regression model is specified as follows
+
+$$\text{Speed}_i = \beta_0 + \beta_1 T1_i + \beta_2 T2_i + \beta_3 T3_i + \gamma' X_i + \epsilon_i$$
+
+Where $T1_i$ , $T2_i$ , and $T3_i$ are indicator variables denoting the treatment condition for observation $i$, representing the presence of the "Children at Play" sign alone, the sign plus toys, and the sign plus toys and balloons, respectively. The regression coefficients $\beta_1$, $\beta_2$, and $\beta_3$ are interpreted as average treatment effects (ATE), or the expected change in vehicle speed (in mph) compared to the control condition (no treatment). For example, 𝛽1reflects the average speed reduction associated with displaying only the sign, relative to the control group.
+
+In addition to vehicle speed, we also examined a secondary outcome: compliance percentage, defined as the proportion of vehicles traveling at or below the 25 mph speed limit. 
+
+$$\text{Compliance Rate} = \frac{\text{Number of vehicles} \leq 25 \text{ mph}}{\text{Total number of vehicles}} \times 100\%$$
+For this outcome, the regression coefficients $\beta_1$, $\beta_2$, and $\beta_3$ would represent the expected change (in percentage points) in compliance relative to the control group. A positive coefficient would indicate an increase in the proportion of compliant drivers under a given treatment condition, while a negative coefficient would indicate a decrease in compliance.
+
+To ensure robust inference, we used heteroskedasticity-consistent standard errors (HC) to correct for potential non-constant variance in the residuals. We also computed 95% confidence intervals using the more conservative HC3 estimator, which provides better protection against small-sample bias. Finally, F-tests were conducted at each stage of model development to determine whether the inclusion of covariates significantly improved model fit. Statistical significance was evaluated at the 5% level ($\alpha = 0.05$) to assess whether any of the treatment conditions reliably reduced vehicle speeds.
+
+### Power Analysis
+
+Before we ran the field test, we did a simple, two-arm power analysis (one treatment vs. control, 50/50 split) to see how many cars we’d need to reliably detect a real change in speed (power = probability of finding an effect if it exists; $\alpha = 0.05$). We assumed baseline speeds around 25 mph with a 5 mph standard deviation and looked at three plausible slowdowns drawn from prior work: about 3 mph from Transport for London’s “2-D road cushions” trial (reported in the Boston Globe by Matt Rocheleau in 2017), roughly 5 mph (≈15%) from New Delhi’s 3-D crosswalk pilots (cited by Delhi Street Art/traffic police, also in the Boston Globe article), and a large 11 mph drop from a Kansas City street mural study (covered by the Washington Post by Sydney Page in 2022). The figure below shows the power analysis results
+
+```{r Power Analysis, echo=FALSE, message=FALSE, warning=FALSE}
+# NOTE: This code is commented because it takes a long time to run
+# simulate_power <- function(
+#   tau            = 5,                          # treatment effect (mph)
+#   sims           = 500,                        # number of simulations
+#   possible.ns    = seq(10, 200, by = 2),      # grid of total sample sizes
+#   mu_control     = 25,                         # mean speed under control (mph)
+#   sigma_control  = 5,                          # SD of control speeds (mph)
+#   alpha          = 0.05                        # significance level
+# ) {
+#   # sanity check: all sample sizes even
+#   stopifnot(all((possible.ns %% 2) == 0))
+# 
+#   # prepare storage
+#   powers <- numeric(length(possible.ns))
+# 
+#   # Loop to vary total sample size
+#   for (j in seq_along(possible.ns)) {
+#     N <- possible.ns[j]
+#     sig_flags <- logical(sims)
+# 
+#     # Loop to repeat simulation
+#     for (i in seq_len(sims)) {
+#       # simulate potential outcomes
+#       Y0 <- rnorm(n = N, mean = mu_control, sd = sigma_control)
+#       Y1 <- Y0 + tau
+# 
+#       # random 50/50 assignment
+#       Z.sim <- sample(rep(c(0,1), each = N/2))
+# 
+#       # reveal observed Y
+#       Y.sim <- ifelse(Z.sim == 1, Y1, Y0)
+# 
+#       # fit regression and extract p‐value
+#       fit     <- lm(Y.sim ~ Z.sim)
+#       p.value <- summary(fit)$coefficients["Z.sim", "Pr(>|t|)"]
+#       sig_flags[i] <- (p.value <= alpha)
+#     }
+# 
+#     # Calculate power
+#     powers[j] <- mean(sig_flags)
+#   }
+# 
+#   # return a dataframe
+#   data.frame(
+#     N     = possible.ns,
+#     power = powers,
+#     tau   = tau
+#   )
+# }
+# 
+# # Scenario 1
+# df1 <- simulate_power(tau = -3)
+# 
+# # Scenario 2
+# df2 <- simulate_power(tau = -5)
+# 
+# # Scenario 3
+# df3 <- simulate_power(tau = -11)
+# 
+# # Plot
+# power_df <- bind_rows(df1, df2, df3) %>%
+#   mutate(Scenario = paste0("τ=", tau, " mph"))
+# 
+# ggplot(power_df, aes(x = N, y = power, color = Scenario)) +
+#   geom_line(linewidth = 1.2) +
+#   geom_hline(yintercept = 0.8, linetype = "dashed") +
+#   labs(
+#     x     = "Total Sample Size",
+#     y     = "Estimated Power",
+#     title = "Power vs. Sample Size under Various Effect Sizes"
+#   )
+
+```
+
+![](Power_Analysis.png)
+power is estimated using the following equation:
+
+$$\text{Power} = P(\text{reject } H_0 | H_1 \text{ is true})$$
+where 
+$$\tau = \mu_{\text{treatment}} - \mu_{\text{control}}$$
+
+The power curves show that an 11-mph effect clears 80% power with very small samples; a 5-mph effect needs ~40–50 total cars; and a 3-mph effect needs ~80–90. With 200 total cars (100 control, 100 treatment) we’d be comfortably powered for all three. Because the true effect might be smaller (e.g., ~1 mph), we set a conservative target of ≥100 vehicles per condition; with four conditions in the final design, that implies ~400 vehicles total to keep precision high even for modest effects. 
+
+# Results
+
+The table below summarizes the descriptive statistics for vehicle speeds observed under each experimental condition. A total of 497 vehicle observations were recorded across the control (C) and three treatment groups (T1, T2, T3). Mean vehicle speed and standard deviation (SD) were calculated for each group to provide a preliminary comparison of driving behavior in response to the different visual interventions. These summary statistics form the basis for subsequent regression analysis assessing the impact of each treatment on speed reduction.
+
+| Condition | Cars (N) | Average Speed (mph) | SD Speed (mph) |
+|:-----------------:|:-----------------:|:-----------------:|:-----------------:|
+| C   | 108   | 24.89   | 3.67  |
+| T1  | 178   | 24.33   | 4.54  |
+| T2  | 102   | 22.97   | 3.63  | 
+| T3  | 109   | 23.33   | 5.22  |
+
+To evaluate the balance of covariates across experimental conditions, we examined vehicle class, color, and fuel type distributions. The following graphs show the distribution of vehicles across these covariates.
+
+```{r Vehicle Class Distribution by Treatment, echo=FALSE, message=TRUE, warning=FALSE, fig.width=6, fig.height = 3, fig.align = "center"}
+# Compute percentages by Treatment and Vehicle_Class
+df_prop <- d %>%
+  count(Treatment, Vehicle_Class) %>%
+  group_by(Treatment) %>%
+  mutate(pct = n / sum(n))
+
+# Plot stacked bars with percentage labels
+ggplot(df_prop, aes(x = Treatment, y = pct, fill = Vehicle_Class)) +
+  geom_col() +
+  geom_text(
+    aes(label = percent(pct, accuracy = 1)),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = "Vehicle Class",
+    title = "Vehicle Class Mix by Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+```{r , echo=FALSE, message=TRUE, warning=FALSE,  fig.width=6, fig.height = 3, fig.align = "center"}
+# Compute percentages by Treatment and Vehicle_Color
+df_color_prop <- d %>%
+  count(Treatment, Vehicle_Color) %>%
+  group_by(Treatment) %>%
+  mutate(pct = n / sum(n))
+
+# Plot stacked bars with percentage labels
+ggplot(df_color_prop, aes(x = Treatment, y = pct, fill = Vehicle_Color)) +
+  geom_col() +
+  geom_text(
+    aes(label = percent(pct, accuracy = 1)),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = "Color Type",
+    title = "Vehicle Color Balance by Treatment"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+Vehicle characteristics were broadly balanced across experimental conditions. Family Utility and Light Commuter vehicles dominated the sample (each 40–55%), with minimal variation across groups. Heavy/Commercial vehicles were less common (5–12%), and Sport/Performance vehicles were rare (<1%). Vehicle color was evenly split between Light/Bright and Dark/Neutral, with group differences within ±8 percentage points. Fuel type was mostly Gas/Diesel/Hybrid (≈93%), with a small share of Electric vehicles (~7%), though EV classification was occasionally uncertain. Overall, covariate distributions suggest successful as-good-as-random treatment assignment.
+
+## Regression Analysis
+
+To evaluate the impact of visual cues on vehicle speed, a series of linear regression models were estimated. Model 1 included only the treatment indicators, while Models 2 through 4 sequentially added vehicle class, color, and fuel type as covariates.
+
+```{r base model, echo=TRUE, warning=FALSE}
+mod_base <- lm(Average_Speed_mph ~ Treatment, data = d)
+mod_base_robust_se <- coeftest(mod_base, vcov = vcovHC(mod_base, type = "HC1"))
+mod_base_robust_se
+```
+
+The following table below demonstrates the summary of the models estimated:
+
+```{r model 1, echo=FALSE, message=FALSE, warning=FALSE}
+# Model 1: + Vehicle Class
+mod_class <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class, data = d)
+mod_class_se <- coeftest(mod_class, vcov = vcovHC(mod_class, type = "HC1"))
+mod_class_ci <- coefci(mod_class, vcov = vcovHC(mod_class, type = "HC3"))
+```
+
+```{r model 2, echo=FALSE}
+# Model 2: + Vehicle Class + Vehicle Color
+mod_class_color <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color, data = d)
+mod_class_color_se <- coeftest(mod_class_color, vcov = vcovHC(mod_class_color, type = "HC1"))
+mod_class_color_ci <- coefci(mod_class_color, vcov = vcovHC(mod_class_color, type = "HC3"))["TreatmentT3", ]
+```
+
+```{r model 3, echo=FALSE}
+# Model 3: + Vehicle Class + Color + Fuel Type
+mod_full <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color + Fuel_Type, data = d)
+mod_full_se <- coeftest(mod_full, vcov = vcovHC(mod_full, type = "HC1"))
+mod_full_ci <- coefci(mod_full, vcov = vcovHC(mod_full, type = "HC3"))["TreatmentT3", ]
+```
+
+```{r, echo=FALSE, warning=FALSE}
+se_base        <- sqrt(diag(vcovHC(mod_base,        type = "HC1")))
+se_class       <- sqrt(diag(vcovHC(mod_class,       type = "HC1")))
+se_class_color <- sqrt(diag(vcovHC(mod_class_color, type = "HC1")))
+se_full        <- sqrt(diag(vcovHC(mod_full,        type = "HC1")))
+
+# Produce side-by-side stargazer table with robust SEs
+
+stargazer(
+  mod_base, mod_class, mod_class_color, mod_full,
+  se             = list(se_base, se_class, se_class_color, se_full),
+  type           = "text",
+  title          = "Regression Results: Average Speed (mph)",
+  dep.var.labels = "Average_Speed_mph",
+  omit.stat      = c("f", "ser", "adj.rsq", "rsq", "n"),
+  notes          = "Robust (HC1) standard errors in parentheses"
+)
+```
+In the baseline model, the Treatment T1 produced a modest, non-significant reduction in speed (–0.56 mph; SE = 0.49). In contrast, the Treatment T2 yielded the largest and most statistically significant effect, reducing average speed by 1.92 mph (SE = 0.50, p < 0.01). The Treatment T3 also led to a significant speed reduction of 1.56 mph (SE = 0.61, p < 0.01).
+
+Treatment effects remained stable across all model specifications, with coefficient shifts under 0.05 mph and no change in significance, indicating robust results unaffected by covariate adjustment.
+
+Covariates including vehicle class, color, and fuel type—had minimal and statistically insignificant effects (|$\beta$| < 0.6 mph). The control group mean remained consistent (~24.9 mph) across models. 
+
+We performed F-test to assess the relative contribution of covariates to explain the average treatment effect. 
+
+$$F = \frac{(RSS_{\text{restricted}} - RSS_{\text{unrestricted}}) / q}{RSS_{\text{unrestricted}} / (n-k)}$$
+
+```{r ftests, echo=FALSE, message=TRUE, warning=FALSE}
+# Subset to rows with no missing values in our key variables
+keep <- complete.cases(
+  d[, c("Average_Speed_mph", "Treatment", 
+        "Vehicle_Class", "Vehicle_Color", "Fuel_Type")]
+)
+d <- d[keep, ]
+
+# Fit the nested models on the same dataset
+mod_base  <- lm(Average_Speed_mph ~ Treatment, data = d)
+mod_class <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class,  data = d)
+mod_class_color <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color, data = d)
+mod_full <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class + Vehicle_Color + Fuel_Type, data = d)
+
+# Perform F-tests for each block of added covariates
+# Does Vehicle_Class improve over Treatment alone?
+anova(mod_base, mod_class)
+
+# Does adding Vehicle_Color improve over Vehicle_Class?
+anova(mod_class, mod_class_color)
+
+# Does adding Fuel_Type improve over Class+Color?
+anova(mod_class_color, mod_full)
+```
+
+```{r ftests_individual, echo=FALSE, message=TRUE, warning=FALSE}
+# Fit the base model and base+one‐covariate models
+mod_base         <- lm(Average_Speed_mph ~ Treatment,  data = d)
+mod_base_class   <- lm(Average_Speed_mph ~ Treatment + Vehicle_Class,  data = d)
+mod_base_color   <- lm(Average_Speed_mph ~ Treatment + Vehicle_Color,  data = d)
+mod_base_fuel    <- lm(Average_Speed_mph ~ Treatment + Fuel_Type,  data = d)
+
+# Perform F-tests comparing base vs. each single‐covariate model
+#    (a) Base vs. + Vehicle_Class
+cat("F-test: Base vs. +Vehicle_Class\n")
+print(anova(mod_base, mod_base_class))
+
+# (b) Base vs. + Vehicle_Color
+cat("\nF-test: Base vs. +Vehicle_Color\n")
+print(anova(mod_base, mod_base_color))
+
+# (c) Base vs. + Fuel_Type
+cat("\nF-test: Base vs. +Fuel_Type\n")
+print(anova(mod_base, mod_base_fuel))
+```
+The sequential F-tests confirmed that adding covariates did not improve model fit (p > 0.05), suggesting they contribute little explanatory value beyond treatment conditions.
+
+### Confidence Intervals
+
+To further interpret the precision and reliability of the estimated treatment effects, 95% confidence intervals (CIs) were calculated for each condition. Following table shows the confidence intervals for each condition
+
+```{r, echo=TRUE, warning=FALSE}
+robust_ci <- coefci(mod_base, vcov = vcovHC(mod_base, type = "HC3"))
+robust_ci
+```
+The following graphs show the speed distribution by treatment.
+
+```{r, echo=FALSE, message=TRUE, warning=FALSE, fig.width=5, fig.height = 3, fig.align = "center"}
+# Fit the base model and compute robust covariance
+mod_base <- lm(Average_Speed_mph ~ Treatment, data = d)
+V_robust <- vcovHC(mod_base, type = "HC1")
+
+# Build prediction frame for each Treatment level
+df_preds <- data.frame(Treatment = levels(d$Treatment))
+X        <- model.matrix(~ Treatment, df_preds)
+est      <- predict(mod_base, newdata = df_preds)
+se_rob   <- sqrt(diag(X %*% V_robust %*% t(X)))
+
+# Assemble stats with robust CIs
+df_stats <- df_preds %>%
+  mutate(
+    mean_speed = est,
+    ci_low     = est - 1.96 * se_rob,
+    ci_high    = est + 1.96 * se_rob
+  )
+
+# Plot boxplots with robust mean & CI, no legend or scatter
+ggplot(d, aes(x = Treatment, y = Average_Speed_mph)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4, fill = "#4C72B0", alpha = 0.3, show.legend = FALSE) +
+  geom_errorbar(
+    data = df_stats,
+    aes(x = Treatment, y = mean_speed, ymin = ci_low, ymax = ci_high),
+    width = 0.2, color = "red", size = 0.8, show.legend = FALSE
+  ) +
+  geom_point(
+    data = df_stats,
+    aes(x = Treatment, y = mean_speed),
+    shape = 21, fill = "white", color = "red", size = 3, show.legend = FALSE
+  ) +
+  coord_cartesian(ylim = c(20, 28)) +
+  scale_y_continuous(name = "Vehicle Speed (mph)") +
+  labs(
+    x = "Treatment Condition",
+    title = "Speed Distributions by Treatment",
+    subtitle = "Boxplots with Robust Mean & 95% CI (red)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+The white circles represent the average and the red line shows the confidence interval. These confidence intervals reinforce earlier findings: only the more visually salient treatments (T2 and T3) produced reliable and statistically significant reductions in vehicle speed, while the sign alone (T1) was insufficient to induce measurable behavioral change.
+
+The boxplot illustrates the estimated treatment effects with 95% confidence intervals. The control group’s mean speed is tightly bounded between 24.19 and 25.58 mph. Treatment 1 shows no statistically reliable effect, as its interval crosses zero. In contrast, both Treatment T2 and Treatment T3 display entirely negative intervals where T2 indicates a significant speed reduction of 1–3 mph and T3 shows a slightly smaller but still significant reduction of 0.3–2.8 mph. These results reinforce the effectiveness of more visually engaging interventions in lowering vehicle speeds.
+
+
+## Compliance Results
+To better understand the treatments’ impact on driver compliance, we examined a secondary outcome: the proportion of vehicles traveling at or below the posted 25 mph speed limit. The following figure presents a bar plot summarizing compliance and non-compliance percentages for each condition.
+
+```{r speed-limit-proportions, echo=FALSE, message=TRUE, warning=FALSE, fig.width=6, fig.height = 3, fig.align = "center"}
+
+# Compute above/below counts and percentages by Treatment
+df_limit <- d %>%
+  mutate(OverLimit = Average_Speed_mph > 25) %>%
+  group_by(Treatment, OverLimit) %>%
+  summarise(Count = n(), .groups="drop") %>%
+  group_by(Treatment) %>%
+  mutate(
+    Percent = Count / sum(Count),
+    Label   = if_else(OverLimit, "Above 25 mph", "At or Below 25 mph"),
+    pct_txt = percent(Percent, accuracy = 1)
+  )
+
+# Plot with percentage labels
+ggplot(df_limit, aes(x = Treatment, y = Percent, fill = Label)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = pct_txt),
+    position = position_stack(vjust = 0.5),
+    color = "white",
+    size = 4
+  ) +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(
+    values = c(
+      "At or Below 25 mph" = "#4C72B0",
+      "Above 25 mph"        = "#C44E52"
+    )
+  ) +
+  labs(
+    x     = "Treatment Condition",
+    y     = "Percent of Vehicles",
+    fill  = NULL,
+    title = "Compliance Distribution"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor    = element_blank(),
+    panel.grid.major.x  = element_blank(),
+    plot.title          = element_text(hjust = 0.5)
+  )
+
+```
+
+The bar plot shows that both T2 and T3  treatments produced visibly higher compliance rates compared to the control group, while the treatment T1 showed little difference.
+
+To formally quantify these differences, we estimated a regression model with compliance percentage as the dependent variable and treatment conditions as predictors. 
+
+```{r}
+mod_base_bin <- lm(at_or_below_25 ~ Treatment, data = d)
+mod_base_bin_robust_se <- coeftest(mod_base_bin, vcov = vcovHC(mod_base_bin, type = "HC1"))
+mod_base_bin_robust_se
+```
+
+where the confidence intervals are:
+```{r}
+robust_ci <- coefci(mod_base_bin, vcov = vcovHC(mod_base_bin, type = "HC3"))
+robust_ci
+```
+
+The following table summarizes the result:
+
+```{r, echo=FALSE, warning=FALSE}
+se_base_bin <- sqrt(diag(vcovHC(mod_base_bin, type = "HC1")))
+
+# Produce side-by-side stargazer table with robust SEs
+stargazer(
+  mod_base_bin,
+  se             = list(se_base_bin),
+  type           = "text",
+  title          = "Regression Results: Compliance %",
+  dep.var.labels = "Compliance %",
+  omit.stat      = c("f", "ser", "adj.rsq", "rsq", "n"),
+  notes          = "Robust (HC1) standard errors in parentheses"
+)
+
+```
+
+The treatment T2 increased compliance by 18.0 percentage points compared to the control group (p = 0.0054; 95% CI [5.27, 30.79]). The treatment T3 increased compliance by 16.91 percentage points (p = 0.0085; 95% CI [4.27, 29.56]). In contrast, the “Sign Only” treatment T1 showed a smaller, statistically non-significant change of 1.38 percentage points (p = 0.8195; 95% CI [−10.57, 13.34]).
+
+## Verifying Day-to-Day Speed Consistency (No Baseline Drift)
+
+
+To validate one of the assumptions of our randomization process that requires minimum variation in vehicle speed across the experiment days, we assessed day-to-day consistency in vehicle speeds using both visual and statistical analyses.
+
+Boxplots for the Control condition (Days 1–3) and Treatment 1 (Days 3–4) below revealed overlapping medians and interquartile ranges, suggesting minimal day-to-day variation. 
+
+```{r, message=TRUE, warning=FALSE, fig.width=6, fig.height = 3, fig.align = "center"}
+# Control group: Days 1, 2, and 3
+df_ctrl <- d %>%
+  filter(Treatment == "C", Day %in% c("1", "2", "3"))
+
+ggplot(df_ctrl, aes(x = Day, y = Average_Speed_mph)) +
+  geom_boxplot(fill = "#4C72B0", alpha = 0.4, outlier.shape = NA) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 0.8) +
+  coord_cartesian(ylim = c( min(df_ctrl$Average_Speed_mph) - 1,
+                            max(df_ctrl$Average_Speed_mph) + 1 )) +
+  labs(
+    title    = "Control Group: Speed by Day (Days 1–3)",
+    x        = "Day",
+    y        = "Vehicle Speed (mph)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title     = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+# Treatment 1 group: Days 3 and 4
+df_t1 <- d %>%
+  filter(Treatment == "T1", Day %in% c("3", "4"))
+
+ggplot(df_t1, aes(x = Day, y = Average_Speed_mph)) +
+  geom_boxplot(fill = "#55A868", alpha = 0.4, outlier.shape = NA) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 0.8) +
+  coord_cartesian(ylim = c( min(df_t1$Average_Speed_mph) - 1,
+                            max(df_t1$Average_Speed_mph) + 1 )) +
+  labs(
+    title    = "Treatment 1: Speed by Day (Days 3–4)",
+    x        = "Day",
+    y        = "Vehicle Speed (mph)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title      = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+This visual impression was confirmed further by non-parametric tests: a Kruskal–Wallis test for Control days and a Wilcoxon rank-sum test for T1 days. The test results are as given below:
+
+```{r, echo=FALSE, message=TRUE, warning=FALSE}
+# Subset data
+df_ctrl <- d %>% filter(Treatment == "C", Day %in% c("1","2","3"))
+df_t1   <- d %>% filter(Treatment == "T1", Day %in% c("3","4"))
+
+# Control arm (Days 1–3): Kruskal–Wallis test
+kruskal_ctrl <- kruskal.test(Average_Speed_mph ~ Day, data = df_ctrl)
+print(kruskal_ctrl)
+
+# Treatment 1 arm (Days 3 vs 4): Wilcoxon rank-sum test
+wilcox_t1 <- wilcox.test(Average_Speed_mph ~ Day, data = df_t1)
+print(wilcox_t1)
+
+```
+Both returned p-values > 0.05, indicating no statistically significant differences in speed distributions. These findings support the assumption of day-to-day consistency and validate the use of a day-randomized design in the field experiment.
+
+# Potential Biases and Limitations
+Even with an experimental design, several factors may have influenced the results and should be considered when interpreting our findings.
+
+### Repeated Exposure and Driver Expectations
+One key concern is that some drivers may have passed the test area more than once, such as daily commuters or neighborhood residents. These repeat drivers may not react the same way as someone seeing the setup for the first time. For example, if a driver saw the "Children at Play" sign earlier in the week and noticed there were no children around, they might not take the sign seriously the next time they see it. Word may have also spread in the neighborhood that the setup was not real, reducing its ability to surprise or influence drivers. This kind of repeated exposure may lead us to underestimate the true effect of the visual cues. A new driver might slow down after seeing toys and balloons, but someone familiar with the setup might ignore it. Since the experiment took place over multiple days at the same location, we could not fully prevent this from happening.
+
+### Non-Random Assignment to Conditions
+Our treatments were applied on different days and time slots rather than being mixed within the same day. This means the group of drivers may not be exactly the same for each condition.. For instance, if drivers tend to be faster on certain days of the week, that could affect the results. Ideally, we would have tested each condition across more days and balanced them throughout the week. Due to time limits on the project, we could not gather enough data to do that.
+
+### No Real Pedestrians Present
+The treatments were designed to suggest the presence of children using props like signs, toys, and balloons. However, there were no actual children near the road during the tests. Some drivers may have noticed this and decided the situation was not a real risk. A reasonable driver might think, "I see the sign and toys, but no children, so I don’t need to slow down." This likely reduced the impact of the treatments. Although it would not have been safe or ethical to include real children in the experiment, the absence of live pedestrians may have limited how realistic the warning appeared.
+
+### Additional Potential Covariates
+It was challenging to capture many covariates in this experiment using only recorded video footage. For example, we intended to include driver gender as a covariate, but it was often difficult to determine from the videos. Future studies could improve precision by tracking additional driver and context-specific factors such as gender, presence of passengers, phone use, and familiarity with the road, as these may influence driving speed.
+
+### Lagged Recording
+Vehicle movements through the marked observation zone were recorded using two fixed-position cameras; one at the entry point and one at the exit. However, the cameras were not precisely time-synchronized, potentially introducing slight discrepancies in the measurement of vehicle travel time. Start and end timestamps were manually annotated through frame-by-frame video review, a process that may be subject to human error.
+
+Similarly, covariate data including vehicle class, color, and fuel type were manually coded based on visual inspection of the video footage. While vehicle color was generally unambiguous, the classification of vehicle type may have involved subjective judgment. Fuel type, in particular, was inferred based on external visual characteristics and should be interpreted as an informed estimate rather than a verified classification. As a result, the accuracy of covariate coding is inherently limited by observer judgment and potential perceptual error.
+
+### Long Term Effects
+This study does not address the long-term effectiveness of the visual treatments. While initial exposure to visual cues such as scattered toys or balloons may prompt drivers to slow down, this effect could diminish over time. Drivers may quickly realize that the visual cues are not accompanied by the actual presence of children, reducing their perceived need to slow down in future encounters. Therefore, the observed speed reductions may reflect short-term novelty effects rather than lasting behavioral change. Future research should examine whether repeated exposure reduces treatment effectiveness or leads to driver habituation.
+
+### Generalizability
+This study took place on a single street in one Los Angeles neighborhood. The road’s layout and the surrounding area may have influenced how drivers reacted. In a different setting, such as a busy urban street or a quiet rural road, drivers might respond differently. Also, driver behavior in Los Angeles might not reflect how drivers act in other cities or regions. For these reasons, we should be cautious when applying these results to other locations.
+We recognize these limitations, and the estimated treatment effects should be interpreted with caution. Future research with broader sampling, better covariate tracking, and varied locations could help validate and strengthen these findings.
+
+# Discussion and Conclusion
+The field experiment provides valuable insights into the effectiveness of low-cost, child-themed visual cues for reducing vehicle speeds on residential streets. The results show that certain visual interventions can produce statistically significant speed reductions.
+
+The “Sign + Toys” condition (T2) produced the largest effect, reducing average vehicle speed by approximately 1.9 mph (p = 0.0001). This represents a meaningful behavioral response that could improve pedestrian safety, given the well-established link between vehicle speed and injury severity. The statistical significance and narrow confidence interval ([-2.91, -0.92]) indicate that this result is unlikely to be due to chance.
+
+The combined treatment (T3), which included the sign, toys, and balloons, also achieved statistical significance, with an average reduction of 1.5 mph (p = 0.0113; 95% CI [-2.76, -0.35]). However, the effect was smaller than that of T2, and the wider confidence interval suggests more variability. The addition of balloons may not have provided additional benefit beyond the sign and toys combination. It is also possible that Day 6 (T3 measurement day) had faster traffic than Day 5 (T2 measurement day) for unrelated reasons. This is supported by the slightly higher robust standard error for T3 (0.61) compared to T2 (0.50) and the wider confidence intervals for T3. To improve precision, future experiments should measure each condition on multiple days of the week.
+
+T1 did not reach statistical significance (p = 0.2551), with a reduction of only 0.56 mph. This finding is consistent with previous research, such as the Minnesota Department of Transportation study by Davis et al. (2012), which found similarly small and practically insignificant effects for standalone “Children at Play” signs. Toys placed along the roadside appear to create a more compelling indication of children’s presence than signage alone.
+
+For the secondary outcome of compliance percentage, defined as the proportion of vehicles traveling at or below the 25 mph limit, T2 increased compliance by 18.0 percentage points (p = 0.0054; 95% CI [5.27, 30.79]) compared to the control group. T3 increased compliance by 16.91 percentage points (p = 0.0085; 95% CI [4.27, 29.56]). In contrast, T1 produced a smaller and statistically non-significant change of 1.38 percentage points (p = 0.8195; 95% CI [−10.57, 13.34]). These results mirror the primary outcome findings, indicating that visual cues involving toys are more effective at promoting speed limit compliance than signage alone.
+
+While the results were statistically significant, the speed reductions of 1.5–1.9 mph may not be practically significant in all contexts. The effect could be stronger if children were actually present, but this was not tested. Potential biases, such as repeated exposure leading to reduced driver responsiveness, may have underestimated effects. Generalizability is also uncertain, as results may differ in other locations.
+
+However, the observed increases in compliance percentage could carry greater practical significance. For example, the 18.0 and 16.91 percentage point increases from T2 and T3, respectively, mean that a much higher share of vehicles were traveling at or below the 25 mph limit. In real-world terms, this shift could translate to only a small fraction of vehicles exceeding the speed limit during treatment periods. If actual children were present, it is reasonable to expect that compliance rates could rise even further, potentially approaching full compliance, given drivers’ heightened sensitivity to immediate child safety. This heightened compliance would not only reduce the average speed but could also eliminate the most dangerous high-speed outliers, which are disproportionately responsible for severe pedestrian injuries. In this sense, while average speed reductions were modest, the compliance improvements highlight the potential for visual cues to produce meaningful, real-world safety benefits.
+
+# Future Work
+
+Future research could build on this work by adopting more advanced and scalable data collection methods. On a limited budget, automating speed measurement and vehicle attribute identification through a computer vision pipeline with deep learning could replace manual timestamping and coding, allowing experiments to be replicated quickly across more streets without additional staff. With substantial funding, studies could incorporate vehicle-level randomization using license-plate recognition, gather driver demographic data, and test interventions across different times of day and seasons. Integrating high-precision sensors with edge computing would allow real-time speed tracking and richer causal analysis over a wider geographic area. Alternative approaches could explore combining visual cues with enforcement measures, testing larger or more noticeable displays, and assessing the effectiveness of street art or murals as traffic-calming interventions.
+
+
+# References:
+
+AAA Foundation for Traffic Safety (FTS). Tefft, B.C. September 2011. Impact Speed and a Pedestrian’s Risk of Severe Injury or Death (Technical Report). Website: https://aaafoundation.org/impact-speed-pedestrians-risk-severe-injury-death/
+
+Arbogast, H., Patao, M., Demeter, N., Bachman, S., Devietti, E., Upperman, J. S., & Burke, R. V. (2018). The effectiveness of installing a speed hump in reducing motor vehicle accidents involving pedestrians under the age of 21. Journal of Transport &amp; Health, 8, 30–34. https://doi.org/10.1016/j.jth.2017.11.004
+
+Children's Safety Network (CSN). November 2013. Walking Safe: Child Pedestrian Safety. Website: https://www.childrenssafetynetwork.org/infographics/walking-safe-child-pedestrian-safety
+
+Children's Safety Network (CSN). May 2022. All Children are Pedestrians! Prevention Tips and Recent Statistics. Website: 
+https://www.childrenssafetynetwork.org/infographics/infographic-child-pedestrian-safety
+Insurance Institute for Highway Safety (IIHS). July 2025. Speed. Website: https://www.iihs.org/research-areas/speed#:~:text=,and%20increasing%20the%20likelihood%20of
+
+Caird, J. K., Johnston, K. A., Willness, C. R., Asbridge, M., & Steel, P. October 2014. A meta-analysis of the effects of texting on driving. Website: https://doi.org/10.1016/j.aap.2014.06.005
+
+PubMed Central (PMC).Stevenson M, Sleet D, Ferguson R. Preventing Child Pedestrian Injury: A Guide for Practitioners. Am J Lifestyle Med. 2015 Nov;9(6):442-450. doi: 10.1177/1559827615569699. Epub 2015 Feb 13. PMID: 31762716; PMCID: PMC6873923. Website: https://pmc.ncbi.nlm.nih.gov/articles/PMC6873923/
+
+PubMed Center (PMC). Pilkington P. Reducing the speed limit to 20 mph in urban areas. Child deaths and injuries would be decreased. BMJ. 2000 Apr 29;320(7243):1160. doi: 10.1136/bmj.320.7243.1160. PMID: 10784528; PMCID: PMC1127572. Website: https://pmc.ncbi.nlm.nih.gov/articles/PMC1127572/
+
+Davis, G., Knapp, K., & Hourdos, J. February 2012. Vehicle speed impacts of occasional hazard (playground) warning signs.Website: https://www.cts.umn.edu/publications/report/vehicle-speed-impacts-of-occasional-hazard-playground-warning-signs
+
+Iio, K., Guo, X., & Lord, D. April 2021. Examining driver distraction in the context of driving speed: An observational study using disruptive technology and naturalistic data. Website: https://doi.org/10.1016/j.aap.2021.105983 
+
+The Boston Globe. Rocheleau, M. November 2017. Can optical illusions trick drivers into slowing down. https://www.bostonglobe.com/metro/2017/11/09/floating-sidewalks-children-running-street-can-optical-illusions-trick-drivers-into-slowing-down/D9Lm0v6rbG3hZm9IimWaLI/story.html
+
+The Washington Post. Page, S. July 2022. Art painted on crosswalks makes streets safer. Website: https://www.washingtonpost.com/lifestyle/2022/06/08/crosswalk-art-safety-bloomberg/
+
+Safe Kids Worldwide. 2023. Traffic-Related Pedestrian Injuries Among Children in 2021. Website: https://www.safekids.org/sites/default/files/documents/fast_facts_-_2021_-_pedestrian_injuries.pdf
+
+Sun, D., El-Basyouny, K., Ibrahim, S., & Kim, A. M. (2018). Are school zones effective in reducing speeds and improving safety? Canadian Journal of Civil Engineering, 45(12), 1084–1092. https://doi.org/10.1139/cjce-2018-0060
